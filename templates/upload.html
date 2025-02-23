@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Monitoring</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #0a0a0a;
+            color: #e0e0e0;
+            text-align: center;
+        }
+        h1 {
+            color: #0099ff;
+            font-size: 2.55rem;
+            margin-top: 20px;
+            text-shadow: 0 0 15px #0099ff;
+        }
+        .container {
+            background: #121212;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px #0099ff;
+            display: inline-block;
+            margin-top: 20px;
+            width: 80%;
+            max-width: 960px;
+        }
+        input[type="file"], input[type="text"] {
+            width: calc(100% - 24px);
+            padding: 12px;
+            background: #1e1e1e;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            margin-bottom: 10px;
+            display: block;
+        }
+        .or-text {
+            color: #0099ff;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #0099ff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+            box-shadow: 0 0 15px #0099ff;
+        }
+        button:hover {
+            background: #007acc;
+            box-shadow: 0 0 20px #0099ff;
+        }
+        .video-container {
+            margin-top: 20px;
+            box-shadow: 0 0 15px #0099ff;
+            padding: 10px;
+            border-radius: 10px;
+            background: #121212;
+            display: inline-block;
+            position: relative;
+        }
+        .download-container {
+            margin-top: 10px;
+            text-align: center;
+        }
+        img {
+            border-radius: 10px;
+            box-shadow: 0 0 15px #0099ff;
+            max-width: 100%;
+        }
+        canvas {
+            max-width: 100%;
+            margin: 20px auto;
+            background-color: #1e1e1e;
+            border-radius: 10px;
+            padding: 10px;
+            box-shadow: 0 0 15px #0099ff;
+        }
+        #downloadCsvBtn {
+            display: none;
+            margin-top: 20px;
+            text-decoration: none;
+        }
+        #downloadCsvBtn button {
+            background-color: #0099ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+            box-shadow: 0 0 15px #0099ff;
+        }
+        #downloadCsvBtn button:hover {
+            background: #007acc;
+            box-shadow: 0 0 20px #0099ff;
+        }
+        #alerts {
+            margin-top: 20px;
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Upload Video or Enter YouTube URL</h1>
+
+        <form action="/" method="post" enctype="multipart/form-data">
+            <label for="file">Choose Video File:</label>
+            <input type="file" name="file" id="file">
+            <br>
+            <label for="youtube_url">Or Enter YouTube URL:</label>
+            <input type="text" name="youtube_url" id="youtube_url" placeholder="https://www.youtube.com/watch?v=...">
+            <br>
+            <button type="submit">Upload</button>
+        </form>
+
+        {% if filename %}
+            <h2>Processing Video: {{ filename }}</h2>
+            <div class="video-container">
+                <img src="{{ url_for('video_feed', filename=filename) }}">
+            </div>
+        {% endif %}
+
+        <h2>Live Traffic Count</h2>
+        <canvas id="trafficChart"></canvas>
+
+        <!-- Alerts Section -->
+        <div id="alerts">
+            <!-- Alerts will be displayed here -->
+        </div>
+
+        <!-- Centered and Styled Download CSV Button -->
+        <div class="download-container">
+            <a id="downloadCsvBtn" href="{{ url_for('download_csv') }}" download style="display: none; text-decoration: none;">
+                <button>Download CSV</button>
+            </a>
+        </div>
+    </div>
+
+    <script>
+        var socket = io();
+
+        // Initialize Chart
+        var ctx = document.getElementById('trafficChart').getContext('2d');
+        var trafficChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], // Frame numbers
+                datasets: [
+                    {
+                        label: 'Vehicles',
+                        borderColor: 'red',
+                        backgroundColor: 'rgba(255, 0, 0, 0.2)',
+                        data: []
+                    },
+                    {
+                        label: 'Pedestrians',
+                        borderColor: 'blue',
+                        backgroundColor: 'rgba(0, 0, 255, 0.2)',
+                        data: []
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Frame Number' } },
+                    y: { title: { display: true, text: 'Count' }, beginAtZero: true }
+                }
+            }
+        });
+
+        // Update Chart Data
+        socket.on('update_chart', function(data) {
+            var labels = trafficChart.data.labels;
+            var vehicles = trafficChart.data.datasets[0].data;
+            var pedestrians = trafficChart.data.datasets[1].data;
+
+            if (labels.length > 50) {
+                labels.shift();
+                vehicles.shift();
+                pedestrians.shift();
+            }
+
+            labels.push(labels.length);
+            vehicles.push(data.vehicles);
+            pedestrians.push(data.pedestrians);
+            
+            trafficChart.update();
+        });
+
+        // Display Alerts
+        socket.on('person_on_road', function(data) {
+            var alertsDiv = document.getElementById('alerts');
+            alertsDiv.innerHTML = data.message; // Display the alert message
+        });
+
+        // Check if CSV is Ready
+        function checkCsvReady() {
+            fetch("{{ url_for('download_csv') }}", { method: "HEAD" })
+                .then(response => {
+                    if (response.ok) {
+                        document.getElementById("downloadCsvBtn").style.display = "inline-block";
+                    }
+                })
+                .catch(error => console.error("Error checking CSV file:", error));
+        }
+
+        // Check for CSV file every 3 seconds
+        setInterval(checkCsvReady, 3000);
+    </script>
+</body>
+</html>
